@@ -41,19 +41,21 @@ public class AppUserJobWorker {
     }
 
     @Scheduled(fixedDelay = 2000)
-    public ResponseEntity<?> processJob() {
+    public void processJob() {
         List<MapRecord<String, Object, Object>> redisRecords =
                 redisTemplate.opsForStream().read(
                         Consumer.from(GROUP, CONSUMER),
-                        StreamReadOptions.empty().count(10),
+                        StreamReadOptions.empty().count(5),
                         StreamOffset.create(STREAM_KEY, ReadOffset.lastConsumed())
                 );
 
         for (MapRecord<String, Object, Object> record : redisRecords) {
             try {
                 Map<Object, Object> recordDataMap = record.getValue();
-                AppUser appUser = new AppUser();
+                System.out.println("Main:");
+                System.out.println(recordDataMap);
 
+                AppUser appUser = new AppUser();
                 appUser.setUsername(recordDataMap.get("username").toString());
                 appUser.setPassword(recordDataMap.get("password").toString());
 
@@ -64,6 +66,19 @@ public class AppUserJobWorker {
                 throw new PersistenceException("Fail to persist in database.");
             }
         }
-        return ResponseEntity.ok("Entity added into database.");
+    }
+
+    @Scheduled(fixedDelay = 2000)
+    public void processPendingJob() {
+        PendingMessagesSummary pending = redisTemplate.opsForStream().pending(STREAM_KEY, GROUP);
+
+        List<MapRecord<String, Object, Object>> pendingRedisRecords =
+                redisTemplate.opsForStream().read(
+                        Consumer.from(GROUP, CONSUMER),
+                        StreamReadOptions.empty().noack(),
+                        StreamOffset.create(STREAM_KEY, ReadOffset.from("0"))
+                );
+
+        System.out.println(pendingRedisRecords);
     }
 }
