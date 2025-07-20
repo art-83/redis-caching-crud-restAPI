@@ -40,8 +40,22 @@ public class AppUserJobWorker {
         }
     }
 
+    public void persistByStreamsMessage(List<MapRecord<String, Object, Object>> genericRecordList) {
+        for (MapRecord<String, Object, Object> record : genericRecordList) {
+            Map<Object, Object> recordDataMap = record.getValue();
+
+            AppUser appUser = new AppUser();
+            appUser.setUsername(recordDataMap.get("username").toString());
+            appUser.setPassword(recordDataMap.get("password").toString());
+
+            appUserRepository.save(appUser);
+            redisTemplate.opsForStream().acknowledge(STREAM_KEY, GROUP, record.getId());
+        }
+    }
+
     @Scheduled(fixedDelay = 2000)
     public void processJob() {
+        Long now = System.currentTimeMillis();
         List<MapRecord<String, Object, Object>> redisRecords =
                 redisTemplate.opsForStream().read(
                         Consumer.from(GROUP, CONSUMER),
@@ -49,29 +63,15 @@ public class AppUserJobWorker {
                         StreamOffset.create(STREAM_KEY, ReadOffset.lastConsumed())
                 );
 
-        for (MapRecord<String, Object, Object> record : redisRecords) {
-            try {
-                Map<Object, Object> recordDataMap = record.getValue();
-                System.out.println("Main:");
-                System.out.println(recordDataMap);
-
-                AppUser appUser = new AppUser();
-                appUser.setUsername(recordDataMap.get("username").toString());
-                appUser.setPassword(recordDataMap.get("password").toString());
-
-                appUserRepository.save(appUser);
-
-                redisTemplate.opsForStream().acknowledge(STREAM_KEY, GROUP, record.getId());
-            } catch (Exception e) {
-                throw new PersistenceException("Fail to persist in database.");
-            }
+        try {
+            persistByStreamsMessage(redisRecords);
+        } catch (Exception e) {
+            throw new PersistenceException("Fail to process job.");
         }
     }
 
     @Scheduled(fixedDelay = 2000)
     public void processPendingJob() {
-        PendingMessagesSummary pending = redisTemplate.opsForStream().pending(STREAM_KEY, GROUP);
-
         List<MapRecord<String, Object, Object>> pendingRedisRecords =
                 redisTemplate.opsForStream().read(
                         Consumer.from(GROUP, CONSUMER),
@@ -79,6 +79,10 @@ public class AppUserJobWorker {
                         StreamOffset.create(STREAM_KEY, ReadOffset.from("0"))
                 );
 
-        System.out.println(pendingRedisRecords);
+        try {
+            persistByStreamsMessage(pendingRedisRecords);
+        } catch (Exception e) {
+            throw new PersistenceException("Fail retrying to process job.");
+        }
     }
 }
