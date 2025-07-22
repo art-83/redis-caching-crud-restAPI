@@ -5,5 +5,5 @@ Esse projeto é uma versão inicial de um sistema que usa Redis Streams com Spri
 
 # Cola para o redis
 
-XRANGE persistence-jobs - +
+XRANGE persistence-jobs - +\
 XPENDING persistence-jobs persistence-group

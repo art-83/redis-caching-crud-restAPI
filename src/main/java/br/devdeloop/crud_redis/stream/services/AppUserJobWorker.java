@@ -42,32 +42,30 @@ public class AppUserJobWorker {
 
     public void persistByStreamsMessage(List<MapRecord<String, Object, Object>> genericRecordList) {
         for (MapRecord<String, Object, Object> record : genericRecordList) {
-            Map<Object, Object> recordDataMap = record.getValue();
+            try {
+                Map<Object, Object> recordDataMap = record.getValue();
+                AppUser appUser = new AppUser();
+                appUser.setUsername(recordDataMap.get("username").toString());
+                appUser.setPassword(recordDataMap.get("password").toString());
 
-            AppUser appUser = new AppUser();
-            appUser.setUsername(recordDataMap.get("username").toString());
-            appUser.setPassword(recordDataMap.get("password").toString());
-
-            appUserRepository.save(appUser);
-            redisTemplate.opsForStream().acknowledge(STREAM_KEY, GROUP, record.getId());
+                appUserRepository.save(appUser);
+                redisTemplate.opsForStream().acknowledge(STREAM_KEY, GROUP, record.getId());
+            } catch (Exception e) {
+                System.out.println(e);
+            }
         }
     }
 
     @Scheduled(fixedDelay = 2000)
     public void processJob() {
-        Long now = System.currentTimeMillis();
         List<MapRecord<String, Object, Object>> redisRecords =
                 redisTemplate.opsForStream().read(
                         Consumer.from(GROUP, CONSUMER),
                         StreamReadOptions.empty().count(5),
-                        StreamOffset.create(STREAM_KEY, ReadOffset.lastConsumed())
+                            StreamOffset.create(STREAM_KEY, ReadOffset.lastConsumed()) // Read messages delivered, if all get right, the message gonna be acknowledged, but
+                                                                                       // if else, the message will be marked as pending and go to Pending Entry List (PEL).
                 );
-
-        try {
-            persistByStreamsMessage(redisRecords);
-        } catch (Exception e) {
-            throw new PersistenceException("Fail to process job.");
-        }
+        persistByStreamsMessage(redisRecords);
     }
 
     @Scheduled(fixedDelay = 2000)
@@ -75,14 +73,10 @@ public class AppUserJobWorker {
         List<MapRecord<String, Object, Object>> pendingRedisRecords =
                 redisTemplate.opsForStream().read(
                         Consumer.from(GROUP, CONSUMER),
-                        StreamReadOptions.empty().noack(),
-                        StreamOffset.create(STREAM_KEY, ReadOffset.from("0"))
+                        StreamReadOptions.empty().count(5),
+                        StreamOffset.create(STREAM_KEY, ReadOffset.from("0")) // Read all messages delivered, but not the acknowledged (in PEL), from index "0" to
+                                                                                    // the end of the list of pending messages.
                 );
-
-        try {
-            persistByStreamsMessage(pendingRedisRecords);
-        } catch (Exception e) {
-            throw new PersistenceException("Fail retrying to process job.");
-        }
+        persistByStreamsMessage(pendingRedisRecords);
     }
 }
